@@ -30,6 +30,8 @@ node scripts/import-woocommerce.mjs --entity products
 # node scripts/import-woocommerce.mjs --entity products --fresh
 
 node scripts/import-woocommerce.mjs --entity customers
+# Phone-only Shopify customers get placeholder emails (see IMPORT_EMAIL_DOMAIN in .env)
+# Products with .svg images import without image (upload PNG/JPG manually or enable SVG in WP)
 node scripts/import-woocommerce.mjs --entity orders
 # Production (Kinsta/Cloudflare)
 # If API calls are challenged, add a Cloudflare WAF/Bot bypass for:

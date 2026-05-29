@@ -70,10 +70,15 @@ async function importProducts(woo, options, mappings) {
     console.log("Importing products one at a time (images use resized Shopify URLs)...");
     let imported = 0;
     for (const product of limited) {
-      const { payload, shopifyId } = productToWoo(product, {
+      const { payload, shopifyId, skippedImages } = productToWoo(product, {
         localImages: product._localImages || [],
         skipImages: false,
       });
+      if (skippedImages?.length) {
+        console.warn(
+          `  Skipping unsupported image type for ${product.title}: ${skippedImages.map((u) => u.split("/").pop()).join(", ")}`
+        );
+      }
       const existingWooId = mappings.products[shopifyId];
 
       if (options.dryRun) {
@@ -97,9 +102,27 @@ async function importProducts(woo, options, mappings) {
           await updateOne(woo, "products", wooId, updatePayload);
           console.log(`  Updated: ${product.title}`);
         } else {
-          const created = await createOne(woo, "products", payload);
-          mappings.products[shopifyId] = created.id;
-          console.log(`  Created: ${product.title} (id ${created.id})`);
+          try {
+            const created = await createOne(woo, "products", payload);
+            mappings.products[shopifyId] = created.id;
+            console.log(`  Created: ${product.title} (id ${created.id})`);
+          } catch (createErr) {
+            const createMsg =
+              createErr.response?.data?.message || createErr.message;
+            if (
+              payload.images?.length &&
+              /invalid image|not allowed to upload this file type/i.test(createMsg)
+            ) {
+              const { images, ...withoutImages } = payload;
+              const created = await createOne(woo, "products", withoutImages);
+              mappings.products[shopifyId] = created.id;
+              console.warn(
+                `  Created without image (unsupported type): ${product.title} (id ${created.id})`
+              );
+            } else {
+              throw createErr;
+            }
+          }
         }
         imported++;
         saveMappings(mappings);
@@ -180,12 +203,12 @@ async function importCustomers(woo, options, mappings) {
     const updateIds = [];
 
     for (const customer of batch) {
-      if (!customer.email) {
-        console.warn(`  Skipping customer without email: ${customer.id}`);
-        continue;
-      }
-
       const payload = customerToWoo(customer);
+      if (!customer.email?.trim()) {
+        console.warn(
+          `  Placeholder email for ${customer.firstName || "customer"} ${customer.lastName || ""}: ${payload.email}`
+        );
+      }
       const existingWooId = mappings.customers[customer.id];
 
       if (existingWooId) {

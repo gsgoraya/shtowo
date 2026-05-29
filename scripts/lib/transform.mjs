@@ -87,6 +87,59 @@ export function resizeShopifyImageUrl(url, width = 800) {
   return `${url}${sep}width=${width}`;
 }
 
+/** WordPress/WooCommerce often blocks SVG uploads via REST. */
+export function isWooSupportedImageUrl(url) {
+  if (!url) return false;
+  const path = url.split("?")[0].toLowerCase();
+  return ![".svg", ".svgz"].some((ext) => path.endsWith(ext));
+}
+
+export function buildProductImages(product, localImages = []) {
+  const raw = [];
+  if (localImages.length) {
+    for (const img of localImages) {
+      if (img.url) raw.push({ src: img.url, alt: img.alt || "" });
+    }
+  } else {
+    for (const { node } of product.media?.edges || []) {
+      if (node?.image?.url) {
+        raw.push({ src: node.image.url, alt: node.image.altText || "" });
+      }
+    }
+  }
+
+  const images = [];
+  const skipped = [];
+  for (const img of raw) {
+    if (!isWooSupportedImageUrl(img.src)) {
+      skipped.push(img.src);
+      continue;
+    }
+    images.push({
+      src: resizeShopifyImageUrl(img.src),
+      alt: img.alt,
+    });
+  }
+  return { images, skipped };
+}
+
+/**
+ * WooCommerce requires an email. Shopify phone-only customers get a stable placeholder.
+ */
+export function resolveCustomerEmail(customer) {
+  const existing = customer.email?.trim();
+  if (existing) return existing;
+
+  const domain = process.env.IMPORT_EMAIL_DOMAIN || "import.customer.local";
+  const id = shopifyIdNumeric(customer.id);
+  const phoneDigits = (customer.phone || "").replace(/\D/g, "");
+
+  if (phoneDigits) {
+    return `phone+${phoneDigits}@${domain}`;
+  }
+  return `shopify+${id}@${domain}`;
+}
+
 export function productToWoo(product, { localImages = [], skipImages = false } = {}) {
   const variants = product.variants?.edges?.map((e) => e.node) || [];
   const primaryVariant = variants[0];
@@ -94,27 +147,9 @@ export function productToWoo(product, { localImages = [], skipImages = false } =
   const categories =
     product.collections?.edges?.map((e) => ({ name: e.node.title })) || [];
 
-  const images = [];
-  if (!skipImages) {
-    if (localImages.length) {
-      for (const img of localImages) {
-        images.push({
-          src: resizeShopifyImageUrl(img.url),
-          alt: img.alt || "",
-        });
-      }
-    } else {
-      const media = product.media?.edges || [];
-      for (const { node } of media) {
-        if (node?.image?.url) {
-          images.push({
-            src: resizeShopifyImageUrl(node.image.url),
-            alt: node.image.altText || "",
-          });
-        }
-      }
-    }
-  }
+  const { images, skipped: skippedImages } = skipImages
+    ? { images: [], skipped: [] }
+    : buildProductImages(product, localImages);
 
   const payload = {
     name: product.title,
@@ -156,7 +191,7 @@ export function productToWoo(product, { localImages = [], skipImages = false } =
     payload.weight = String(weight.value);
   }
 
-  return { payload, variants, shopifyId: product.id };
+  return { payload, variants, shopifyId: product.id, skippedImages };
 }
 
 export function customerToWoo(customer) {
@@ -167,20 +202,28 @@ export function customerToWoo(customer) {
     customer.defaultAddress || addressList[0]
   );
   const shipping = billing;
+  const email = resolveCustomerEmail(customer);
+  const syntheticEmail = !customer.email?.trim();
 
   return {
-    email: customer.email,
+    email,
     first_name: customer.firstName || billing.first_name || "",
     last_name: customer.lastName || billing.last_name || "",
-    billing: { ...billing, email: customer.email, phone: customer.phone || billing.phone },
-    shipping,
+    billing: { ...billing, email, phone: customer.phone || billing.phone },
+    shipping: { ...shipping, email },
     meta_data: [
-      { key: "_shopify_customer_id", value: customer.id },
+      { key: "_shopify_customer_id", value: String(customer.id) },
       { key: "_shopify_orders_count", value: String(customer.numberOfOrders ?? 0) },
       {
         key: "_shopify_total_spent",
-        value: customer.amountSpent?.amount ?? "0",
+        value: String(customer.amountSpent?.amount ?? "0"),
       },
+      ...(syntheticEmail
+        ? [
+            { key: "_import_synthetic_email", value: "true" },
+            { key: "_shopify_phone", value: String(customer.phone || "") },
+          ]
+        : []),
     ],
   };
 }
