@@ -59,18 +59,14 @@ export async function createWooClient({ silent = false } = {}) {
     console.log("Using /wp-json/wc/v3/ (OAuth on HTTP, Basic on HTTPS)");
   }
 
-  const userAgent = process.env.WOO_USER_AGENT || "PeptologyMigration/1.0";
-
+  // Do NOT pass headers via axiosConfig — the Woo library spreads axiosConfig last and
+  // replaces options.headers, dropping Content-Type on POST. That creates empty "Product" shells.
   return new WooCommerceRestApi({
     url: baseUrl,
     consumerKey,
     consumerSecret,
     version: "wc/v3",
     timeout: 120000,
-    axiosConfig: {
-      timeout: 120000,
-      headers: { "User-Agent": userAgent },
-    },
   });
 }
 

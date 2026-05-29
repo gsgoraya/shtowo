@@ -131,8 +131,8 @@ export function productToWoo(product, { localImages = [], skipImages = false } =
     images,
     tags: normalizeTags(product.tags).map((name) => ({ name })),
     meta_data: [
-      { key: "_shopify_product_id", value: product.id },
-      { key: "_shopify_handle", value: product.handle },
+      { key: "_shopify_product_id", value: String(product.id) },
+      { key: "_shopify_handle", value: String(product.handle) },
     ],
   };
 
