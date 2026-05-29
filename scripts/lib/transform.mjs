@@ -1,0 +1,260 @@
+/**
+ * Transform Shopify export records into WooCommerce REST API payloads.
+ */
+
+export function normalizeTags(tags) {
+  if (!tags) return [];
+  if (Array.isArray(tags)) return tags.filter(Boolean);
+  if (typeof tags === "string") {
+    return tags.split(",").map((t) => t.trim()).filter(Boolean);
+  }
+  return [];
+}
+
+export function shopifyIdNumeric(gid) {
+  if (!gid) return null;
+  const match = String(gid).match(/\/(\d+)$/);
+  return match ? match[1] : null;
+}
+
+export function generateSku(variant, handle) {
+  if (variant?.sku) return variant.sku;
+  const variantId = shopifyIdNumeric(variant?.id);
+  if (variantId) return `shopify-${variantId}`;
+  return handle || `shopify-product-${Date.now()}`;
+}
+
+export function mapProductStatus(shopifyStatus) {
+  return shopifyStatus === "ACTIVE" ? "publish" : "draft";
+}
+
+export function mapOrderStatus(financialStatus, fulfillmentStatus, cancelledAt) {
+  if (cancelledAt) return "cancelled";
+  const financial = String(financialStatus || "").toUpperCase();
+  const fulfillment = String(fulfillmentStatus || "").toUpperCase();
+
+  if (financial === "REFUNDED" || financial === "PARTIALLY_REFUNDED") {
+    return "refunded";
+  }
+  if (financial === "VOIDED") return "cancelled";
+  if (fulfillment === "FULFILLED") return "completed";
+  if (financial === "PAID" || financial === "PARTIALLY_PAID") {
+    return fulfillment === "UNFULFILLED" ? "processing" : "completed";
+  }
+  if (financial === "PENDING" || financial === "AUTHORIZED") {
+    return "on-hold";
+  }
+  return "pending";
+}
+
+export function mapAddress(addr, email) {
+  if (!addr) return {};
+  return {
+    first_name: addr.firstName || "",
+    last_name: addr.lastName || "",
+    company: addr.company || "",
+    address_1: addr.address1 || "",
+    address_2: addr.address2 || "",
+    city: addr.city || "",
+    state: addr.provinceCode || addr.province || "",
+    postcode: addr.zip || "",
+    country: addr.countryCodeV2 || addr.country || "",
+    email: email || "",
+    phone: addr.phone || "",
+  };
+}
+
+export function mapCustomerAddress(addr) {
+  if (!addr) return {};
+  return {
+    first_name: addr.firstName || "",
+    last_name: addr.lastName || "",
+    company: addr.company || "",
+    address_1: addr.address1 || "",
+    address_2: addr.address2 || "",
+    city: addr.city || "",
+    state: addr.province || "",
+    postcode: addr.zip || "",
+    country: addr.country || "",
+    phone: addr.phone || "",
+  };
+}
+
+/** Request a smaller image from Shopify CDN to avoid PHP/ImageMagick timeouts on import. */
+export function resizeShopifyImageUrl(url, width = 800) {
+  if (!url || !url.includes("cdn.shopify.com")) return url;
+  const sep = url.includes("?") ? "&" : "?";
+  return `${url}${sep}width=${width}`;
+}
+
+export function productToWoo(product, { localImages = [], skipImages = false } = {}) {
+  const variants = product.variants?.edges?.map((e) => e.node) || [];
+  const primaryVariant = variants[0];
+  const sku = generateSku(primaryVariant, product.handle);
+  const categories =
+    product.collections?.edges?.map((e) => ({ name: e.node.title })) || [];
+
+  const images = [];
+  if (!skipImages) {
+    if (localImages.length) {
+      for (const img of localImages) {
+        images.push({
+          src: resizeShopifyImageUrl(img.url),
+          alt: img.alt || "",
+        });
+      }
+    } else {
+      const media = product.media?.edges || [];
+      for (const { node } of media) {
+        if (node?.image?.url) {
+          images.push({
+            src: resizeShopifyImageUrl(node.image.url),
+            alt: node.image.altText || "",
+          });
+        }
+      }
+    }
+  }
+
+  const payload = {
+    name: product.title,
+    slug: product.handle,
+    type: variants.length > 1 ? "variable" : "simple",
+    status: mapProductStatus(product.status),
+    description: product.descriptionHtml || "",
+    short_description: "",
+    sku,
+    regular_price: primaryVariant?.price || "0",
+    manage_stock: true,
+    stock_quantity: primaryVariant?.inventoryQuantity ?? 0,
+    categories,
+    images,
+    tags: normalizeTags(product.tags).map((name) => ({ name })),
+    meta_data: [
+      { key: "_shopify_product_id", value: product.id },
+      { key: "_shopify_handle", value: product.handle },
+    ],
+  };
+
+  if (primaryVariant?.compareAtPrice) {
+    payload.sale_price = primaryVariant.price;
+    payload.regular_price = primaryVariant.compareAtPrice;
+  }
+
+  if (product.seo?.title) {
+    payload.meta_data.push({ key: "_yoast_wpseo_title", value: product.seo.title });
+  }
+  if (product.seo?.description) {
+    payload.meta_data.push({
+      key: "_yoast_wpseo_metadesc",
+      value: product.seo.description,
+    });
+  }
+
+  const weight = primaryVariant?.inventoryItem?.measurement?.weight;
+  if (weight?.value) {
+    payload.weight = String(weight.value);
+  }
+
+  return { payload, variants, shopifyId: product.id };
+}
+
+export function customerToWoo(customer) {
+  const addressList = Array.isArray(customer.addresses)
+    ? customer.addresses
+    : customer.addresses?.edges?.map((e) => e.node) || [];
+  const billing = mapCustomerAddress(
+    customer.defaultAddress || addressList[0]
+  );
+  const shipping = billing;
+
+  return {
+    email: customer.email,
+    first_name: customer.firstName || billing.first_name || "",
+    last_name: customer.lastName || billing.last_name || "",
+    billing: { ...billing, email: customer.email, phone: customer.phone || billing.phone },
+    shipping,
+    meta_data: [
+      { key: "_shopify_customer_id", value: customer.id },
+      { key: "_shopify_orders_count", value: String(customer.numberOfOrders ?? 0) },
+      {
+        key: "_shopify_total_spent",
+        value: customer.amountSpent?.amount ?? "0",
+      },
+    ],
+  };
+}
+
+export function orderToWoo(order, mappings) {
+  const lineItems = [];
+  const lineEdges = order.lineItems?.edges || [];
+
+  for (const { node: item } of lineEdges) {
+    const productGid = item.variant?.product?.id || item.product?.id;
+    const wooProductId = productGid ? mappings.products[productGid] : null;
+    const qty = item.quantity || 1;
+    const unitPrice = item.originalUnitPriceSet?.shopMoney?.amount || "0";
+    const lineTotal = item.discountedTotalSet?.shopMoney?.amount || String(Number(unitPrice) * qty);
+
+    const lineItem = {
+      name: item.title,
+      quantity: qty,
+      subtotal: lineTotal,
+      total: lineTotal,
+      sku: item.sku || (item.variant?.sku ?? ""),
+      meta_data: [{ key: "_shopify_line_item_id", value: item.id }],
+    };
+
+    if (wooProductId) {
+      lineItem.product_id = wooProductId;
+    }
+
+    lineItems.push(lineItem);
+  }
+
+  const shippingLines = (order.shippingLines?.edges || []).map(({ node }) => ({
+    method_id: "flat_rate",
+    method_title: node.title || "Shipping",
+    total: node.originalPriceSet?.shopMoney?.amount || "0",
+  }));
+
+  const customerGid = order.customer?.id;
+  const customerId = customerGid ? mappings.customers[customerGid] : null;
+
+  const gateway = order.paymentGatewayNames?.[0] || "shopify";
+  const status = mapOrderStatus(
+    order.displayFinancialStatus,
+    order.displayFulfillmentStatus,
+    order.cancelledAt
+  );
+
+  return {
+    status,
+    customer_id: customerId || 0,
+    billing: mapAddress(order.billingAddress, order.email),
+    shipping: mapAddress(order.shippingAddress, order.email),
+    line_items: lineItems,
+    shipping_lines: shippingLines,
+    customer_note: order.note || "",
+    payment_method: "shopify_import",
+    payment_method_title: gateway,
+    set_paid: ["PAID", "PARTIALLY_PAID"].includes(
+      String(order.displayFinancialStatus || "").toUpperCase()
+    ),
+    meta_data: [
+      { key: "_shopify_order_id", value: order.id },
+      { key: "_shopify_order_name", value: order.name },
+      { key: "_shopify_created_at", value: order.createdAt },
+      { key: "_shopify_financial_status", value: order.displayFinancialStatus },
+      {
+        key: "_shopify_fulfillment_status",
+        value: order.displayFulfillmentStatus,
+      },
+      {
+        key: "_shopify_total",
+        value: order.totalPriceSet?.shopMoney?.amount || "0",
+      },
+    ],
+    shopifyId: order.id,
+  };
+}

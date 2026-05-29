@@ -1,0 +1,328 @@
+#!/usr/bin/env node
+import { dirname } from "path";
+import { config } from "./lib/config.mjs";
+import { parseArgs, printHelp } from "./lib/cli.mjs";
+import { readJson, writeJson, ensureDir } from "./lib/fs-utils.mjs";
+import {
+  productToWoo,
+  customerToWoo,
+  orderToWoo,
+} from "./lib/transform.mjs";
+import {
+  createWooClient,
+  batchCreate,
+  batchUpdate,
+  createOne,
+  updateOne,
+  extractBatchResults,
+  verifyWooCredentials,
+} from "./lib/woo-client.mjs";
+
+const ENTITIES = ["products", "customers", "orders"];
+
+function loadMappings() {
+  return (
+    readJson(config.paths.mappings, {
+      products: {},
+      customers: {},
+      orders: {},
+      variants: {},
+    }) || { products: {}, customers: {}, orders: {}, variants: {} }
+  );
+}
+
+function saveMappings(mappings) {
+  ensureDir(dirname(config.paths.mappings));
+  writeJson(config.paths.mappings, mappings);
+}
+
+function chunk(array, size) {
+  const chunks = [];
+  for (let i = 0; i < array.length; i += size) {
+    chunks.push(array.slice(i, i + size));
+  }
+  return chunks;
+}
+
+async function importProducts(woo, options, mappings) {
+  const products = readJson(config.paths.products, []);
+  if (!products.length) {
+    console.log("No products in export. Run export first.");
+    return 0;
+  }
+
+  const limited = options.limit ? products.slice(0, options.limit) : products;
+  const withImages = !options.skipImages;
+
+  if (withImages) {
+    console.log("Importing products one at a time (images use resized Shopify URLs)...");
+    let imported = 0;
+    for (const product of limited) {
+      const { payload, shopifyId } = productToWoo(product, {
+        localImages: product._localImages || [],
+        skipImages: false,
+      });
+      const existingWooId = mappings.products[shopifyId];
+
+      if (options.dryRun) {
+        console.log(`  [dry-run] ${product.title}`);
+        imported++;
+        continue;
+      }
+
+      try {
+        if (existingWooId) {
+          const { sku, ...updatePayload } = payload;
+          await updateOne(woo, "products", existingWooId, updatePayload);
+          console.log(`  Updated: ${product.title}`);
+        } else {
+          const created = await createOne(woo, "products", payload);
+          mappings.products[shopifyId] = created.id;
+          console.log(`  Created: ${product.title} (id ${created.id})`);
+        }
+        imported++;
+        saveMappings(mappings);
+      } catch (err) {
+        const msg = err.response?.data?.message || err.message;
+        console.error(`  Failed: ${product.title} — ${msg}`);
+        if (err.response?.data?.data?.error?.message?.includes("Maximum execution time")) {
+          console.error(
+            "    Tip: run with --skip-images, then: node scripts/import-product-images.mjs"
+          );
+        }
+      }
+    }
+    return imported;
+  }
+
+  let imported = 0;
+  for (const batch of chunk(limited, options.batchSize)) {
+    const toCreate = [];
+    const toUpdate = [];
+    const createIds = [];
+    const updateIds = [];
+
+    for (const product of batch) {
+      const { payload, shopifyId } = productToWoo(product, { skipImages: true });
+
+      const existingWooId = mappings.products[shopifyId];
+      if (existingWooId) {
+        toUpdate.push({ id: existingWooId, ...payload });
+        updateIds.push(shopifyId);
+      } else {
+        toCreate.push(payload);
+        createIds.push(shopifyId);
+      }
+    }
+
+    if (options.dryRun) {
+      console.log(
+        `  [dry-run] products batch: ${toCreate.length} create, ${toUpdate.length} update`
+      );
+      imported += batch.length;
+      continue;
+    }
+
+    if (toCreate.length) {
+      const result = await batchCreate(woo, "products", toCreate);
+      const newMap = extractBatchResults(result, createIds);
+      Object.assign(mappings.products, newMap);
+      console.log(`  Created ${Object.keys(newMap).length} products`);
+    }
+
+    if (toUpdate.length) {
+      await batchUpdate(woo, "products", toUpdate);
+      console.log(`  Updated ${toUpdate.length} products`);
+    }
+
+    imported += batch.length;
+    saveMappings(mappings);
+  }
+
+  return imported;
+}
+
+async function importCustomers(woo, options, mappings) {
+  const customers = readJson(config.paths.customers, []);
+  if (!customers.length) {
+    console.log("No customers in export. Run export first.");
+    return 0;
+  }
+
+  const limited = options.limit ? customers.slice(0, options.limit) : customers;
+  let imported = 0;
+
+  for (const batch of chunk(limited, options.batchSize)) {
+    const toCreate = [];
+    const toUpdate = [];
+    const createIds = [];
+    const updateIds = [];
+
+    for (const customer of batch) {
+      if (!customer.email) {
+        console.warn(`  Skipping customer without email: ${customer.id}`);
+        continue;
+      }
+
+      const payload = customerToWoo(customer);
+      const existingWooId = mappings.customers[customer.id];
+
+      if (existingWooId) {
+        toUpdate.push({ id: existingWooId, ...payload });
+        updateIds.push(customer.id);
+      } else {
+        toCreate.push(payload);
+        createIds.push(customer.id);
+      }
+    }
+
+    if (options.dryRun) {
+      console.log(
+        `  [dry-run] customers batch: ${toCreate.length} create, ${toUpdate.length} update`
+      );
+      imported += batch.length;
+      continue;
+    }
+
+    if (toCreate.length) {
+      const result = await batchCreate(woo, "customers", toCreate);
+      const newMap = extractBatchResults(result, createIds);
+      Object.assign(mappings.customers, newMap);
+      console.log(`  Created ${Object.keys(newMap).length} customers`);
+    }
+
+    if (toUpdate.length) {
+      await batchUpdate(woo, "customers", toUpdate);
+      console.log(`  Updated ${toUpdate.length} customers`);
+    }
+
+    imported += batch.length;
+    saveMappings(mappings);
+  }
+
+  return imported;
+}
+
+async function importOrders(woo, options, mappings) {
+  const orders = readJson(config.paths.orders, []);
+  if (!orders.length) {
+    console.log("No orders in export. Run export first.");
+    return 0;
+  }
+
+  const limited = options.limit ? orders.slice(0, options.limit) : orders;
+  let imported = 0;
+
+  for (const batch of chunk(limited, options.batchSize)) {
+    const toCreate = [];
+    const toUpdate = [];
+    const createIds = [];
+    const updateIds = [];
+
+    for (const order of batch) {
+      const { shopifyId, ...payload } = orderToWoo(order, mappings);
+      const existingWooId = mappings.orders[shopifyId];
+
+      if (existingWooId) {
+        toUpdate.push({ id: existingWooId, ...payload });
+        updateIds.push(shopifyId);
+      } else {
+        toCreate.push(payload);
+        createIds.push(shopifyId);
+      }
+    }
+
+    if (options.dryRun) {
+      console.log(
+        `  [dry-run] orders batch: ${toCreate.length} create, ${toUpdate.length} update`
+      );
+      imported += batch.length;
+      continue;
+    }
+
+    if (toCreate.length) {
+      const result = await batchCreate(woo, "orders", toCreate);
+      const newMap = extractBatchResults(result, createIds);
+      Object.assign(mappings.orders, newMap);
+      console.log(`  Created ${Object.keys(newMap).length} orders`);
+    }
+
+    if (toUpdate.length) {
+      await batchUpdate(woo, "orders", toUpdate);
+      console.log(`  Updated ${toUpdate.length} orders`);
+    }
+
+    imported += batch.length;
+    saveMappings(mappings);
+  }
+
+  return imported;
+}
+
+async function main() {
+  const options = parseArgs();
+  if (options.entity === "products" && !options.skipImages && options.batchSize === 25) {
+    options.batchSize = 1;
+  }
+  if (options.help) {
+    printHelp("import");
+    process.exit(0);
+  }
+
+  const entities = options.entity ? [options.entity] : ENTITIES;
+  for (const e of entities) {
+    if (!ENTITIES.includes(e)) {
+      console.error(`Unknown entity: ${e}. Use products, customers, or orders.`);
+      process.exit(1);
+    }
+  }
+
+  const mappings = loadMappings();
+  let woo = null;
+
+  if (!options.dryRun) {
+    await verifyWooCredentials();
+    woo = await createWooClient();
+    console.log(`WooCommerce: ${config.woo.url}`);
+  } else {
+    console.log("Dry run — no WooCommerce API calls");
+  }
+
+  const manifest = readJson(config.paths.manifest, {});
+  manifest.importedAt = manifest.importedAt || {};
+
+  for (const entity of entities) {
+    console.log(`\nImporting ${entity}...`);
+    let count = 0;
+
+    if (entity === "products") count = await importProducts(woo, options, mappings);
+    if (entity === "customers") count = await importCustomers(woo, options, mappings);
+    if (entity === "orders") count = await importOrders(woo, options, mappings);
+
+    manifest.importedAt[entity] = new Date().toISOString();
+    manifest.importCounts = manifest.importCounts || {};
+    manifest.importCounts[entity] = count;
+    console.log(`Imported ${count} ${entity}`);
+  }
+
+  if (!options.dryRun) {
+    saveMappings(mappings);
+    writeJson(config.paths.manifest, {
+      ...manifest,
+      mappingsFile: config.paths.mappings,
+    });
+  }
+
+  console.log("\nImport complete.");
+  if (!options.dryRun) {
+    console.log(`Mappings: ${config.paths.mappings}`);
+  }
+}
+
+main().catch((err) => {
+  console.error("Import failed:", err.message);
+  if (err.response?.data) {
+    console.error(JSON.stringify(err.response.data, null, 2));
+  }
+  process.exit(1);
+});

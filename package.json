@@ -1,0 +1,21 @@
+{
+  "name": "peptology-migration",
+  "version": "1.0.0",
+  "description": "Shopify to WooCommerce migration pipeline",
+  "type": "module",
+  "scripts": {
+    "export": "node scripts/export-shopify.mjs",
+    "export:products": "node scripts/export-shopify.mjs --entity products",
+    "export:customers": "node scripts/export-shopify.mjs --entity customers",
+    "export:orders": "node scripts/export-shopify.mjs --entity orders",
+    "import": "node scripts/import-woocommerce.mjs",
+    "import:dry": "node scripts/import-woocommerce.mjs --dry-run",
+    "woo:test": "node scripts/test-woo-connection.mjs",
+    "woo:fix-permalinks": "node scripts/fix-woo-permalinks.mjs",
+    "import:images": "node scripts/import-product-images.mjs"
+  },
+  "dependencies": {
+    "@woocommerce/woocommerce-rest-api": "^1.0.1",
+    "dotenv": "^16.4.7"
+  }
+}
