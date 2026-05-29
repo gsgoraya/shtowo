@@ -6,6 +6,7 @@ export function parseArgs(argv = process.argv.slice(2)) {
     limit: null,
     includeDrafts: false,
     skipImages: false,
+    fresh: false,
     batchSize: 25,
   };
 
@@ -13,6 +14,7 @@ export function parseArgs(argv = process.argv.slice(2)) {
     const arg = argv[i];
     if (arg === "--dry-run") options.dryRun = true;
     else if (arg === "--resume") options.resume = true;
+    else if (arg === "--fresh") options.fresh = true;
     else if (arg === "--skip-images") options.skipImages = true;
     else if (arg === "--include-drafts") options.includeDrafts = true;
     else if (arg === "--entity" && argv[i + 1]) options.entity = argv[++i];
@@ -42,6 +44,7 @@ Options:
   --entity products|customers|orders   Import only one entity (default: all)
   --dry-run                            Transform only, no WooCommerce writes
   --skip-images                        Skip product images (fast; run import-product-images later)
+  --fresh                              Ignore mappings file (use on a new site; avoids Invalid ID from local Docker IDs)
   --batch-size N                       Items per batch (default: 1 for products with images, 25 otherwise)
   --limit N                            Import only first N records
 `;

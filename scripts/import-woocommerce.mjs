@@ -20,7 +20,10 @@ import {
 
 const ENTITIES = ["products", "customers", "orders"];
 
-function loadMappings() {
+function loadMappings(options = {}) {
+  if (options.fresh) {
+    return { products: {}, customers: {}, orders: {}, variants: {} };
+  }
   return (
     readJson(config.paths.mappings, {
       products: {},
@@ -29,6 +32,15 @@ function loadMappings() {
       variants: {},
     }) || { products: {}, customers: {}, orders: {}, variants: {} }
   );
+}
+
+async function wooResourceExists(woo, resource, id) {
+  try {
+    await woo.get(`${resource}/${id}`);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function saveMappings(mappings) {
@@ -71,9 +83,18 @@ async function importProducts(woo, options, mappings) {
       }
 
       try {
-        if (existingWooId) {
+        let wooId = existingWooId;
+        if (wooId && !(await wooResourceExists(woo, "products", wooId))) {
+          console.warn(
+            `  Stale mapping for ${product.title} (WC #${wooId} not on this site) — creating new`
+          );
+          delete mappings.products[shopifyId];
+          wooId = null;
+        }
+
+        if (wooId) {
           const { sku, ...updatePayload } = payload;
-          await updateOne(woo, "products", existingWooId, updatePayload);
+          await updateOne(woo, "products", wooId, updatePayload);
           console.log(`  Updated: ${product.title}`);
         } else {
           const created = await createOne(woo, "products", payload);
@@ -277,7 +298,10 @@ async function main() {
     }
   }
 
-  const mappings = loadMappings();
+  const mappings = loadMappings(options);
+  if (options.fresh) {
+    console.log("Using --fresh: ignoring existing mappings (new site import)");
+  }
   let woo = null;
 
   if (!options.dryRun) {

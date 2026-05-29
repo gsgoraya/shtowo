@@ -24,6 +24,11 @@ node scripts/import-woocommerce.mjs --entity products
 #   npm run import:images
 
 # Local Docker: npm run woo:fix-permalinks (enables /wp-json/ + PHP 120s timeout)
+
+# Production / new site: do not reuse mappings from local Docker (causes "Invalid ID")
+# rm mappings/shopify-to-woo.json
+# node scripts/import-woocommerce.mjs --entity products --fresh
+
 node scripts/import-woocommerce.mjs --entity customers
 node scripts/import-woocommerce.mjs --entity orders
 # Production (Kinsta/Cloudflare)
