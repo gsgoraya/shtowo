@@ -29,9 +29,18 @@ node scripts/import-woocommerce.mjs --entity products
 # rm mappings/shopify-to-woo.json
 # node scripts/import-woocommerce.mjs --entity products --fresh
 
+# Re-import orders after deleting them in WooCommerce (keeps product/customer mappings):
+# node scripts/import-woocommerce.mjs --entity orders --fresh
+
 node scripts/import-woocommerce.mjs --entity customers
 # Phone-only Shopify customers get placeholder emails (see IMPORT_EMAIL_DOMAIN in .env)
 # Products with .svg images import without image (upload PNG/JPG manually or enable SVG in WP)
+
+## Apology emails (accidental import notifications)
+
+If customers received WooCommerce emails during import, install the plugin in
+`wordpress-plugin/peptology-import-apology/` (zip folder → WP Admin → Plugins → Upload).
+Then: **Tools → Import Apology Emails** — dry run first, then send in batches.
 node scripts/import-woocommerce.mjs --entity orders
 # Production (Kinsta/Cloudflare)
 # If API calls are challenged, add a Cloudflare WAF/Bot bypass for:

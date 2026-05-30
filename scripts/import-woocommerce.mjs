@@ -21,17 +21,28 @@ import {
 const ENTITIES = ["products", "customers", "orders"];
 
 function loadMappings(options = {}) {
-  if (options.fresh) {
-    return { products: {}, customers: {}, orders: {}, variants: {} };
+  const empty = { products: {}, customers: {}, orders: {}, variants: {} };
+  if (options.fresh && !options.entity) {
+    return { ...empty };
   }
-  return (
-    readJson(config.paths.mappings, {
-      products: {},
-      customers: {},
-      orders: {},
-      variants: {},
-    }) || { products: {}, customers: {}, orders: {}, variants: {} }
-  );
+  const loaded =
+    readJson(config.paths.mappings, { ...empty }) || { ...empty };
+  if (options.fresh && options.entity && ENTITIES.includes(options.entity)) {
+    loaded[options.entity] = {};
+  }
+  return loaded;
+}
+
+function logBatchErrors(batchResponse, label) {
+  for (const op of ["create", "update"]) {
+    const items = batchResponse?.[op] || [];
+    for (const item of items) {
+      if (item?.error) {
+        const msg = item.error.message || JSON.stringify(item.error);
+        console.error(`  ${label} ${op} error: ${msg}`);
+      }
+    }
+  }
 }
 
 async function wooResourceExists(woo, resource, id) {
@@ -255,52 +266,54 @@ async function importOrders(woo, options, mappings) {
   }
 
   const limited = options.limit ? orders.slice(0, options.limit) : orders;
-  let imported = 0;
+  let created = 0;
+  let updated = 0;
+  let failed = 0;
 
-  for (const batch of chunk(limited, options.batchSize)) {
-    const toCreate = [];
-    const toUpdate = [];
-    const createIds = [];
-    const updateIds = [];
+  console.log("Importing orders one at a time (avoids silent batch failures)...");
 
-    for (const order of batch) {
-      const { shopifyId, ...payload } = orderToWoo(order, mappings);
-      const existingWooId = mappings.orders[shopifyId];
-
-      if (existingWooId) {
-        toUpdate.push({ id: existingWooId, ...payload });
-        updateIds.push(shopifyId);
-      } else {
-        toCreate.push(payload);
-        createIds.push(shopifyId);
-      }
-    }
+  for (const order of limited) {
+    const { shopifyId, ...payload } = orderToWoo(order, mappings);
+    let wooId = mappings.orders[shopifyId];
 
     if (options.dryRun) {
-      console.log(
-        `  [dry-run] orders batch: ${toCreate.length} create, ${toUpdate.length} update`
-      );
-      imported += batch.length;
+      console.log(`  [dry-run] ${order.name || shopifyId}`);
+      created++;
       continue;
     }
 
-    if (toCreate.length) {
-      const result = await batchCreate(woo, "orders", toCreate);
-      const newMap = extractBatchResults(result, createIds);
-      Object.assign(mappings.orders, newMap);
-      console.log(`  Created ${Object.keys(newMap).length} orders`);
-    }
+    try {
+      if (wooId && !(await wooResourceExists(woo, "orders", wooId))) {
+        console.warn(
+          `  Stale mapping for ${order.name} (WC #${wooId} deleted) — creating new`
+        );
+        delete mappings.orders[shopifyId];
+        wooId = null;
+      }
 
-    if (toUpdate.length) {
-      await batchUpdate(woo, "orders", toUpdate);
-      console.log(`  Updated ${toUpdate.length} orders`);
+      if (wooId) {
+        await updateOne(woo, "orders", wooId, payload);
+        console.log(`  Updated: ${order.name}`);
+        updated++;
+      } else {
+        const result = await createOne(woo, "orders", payload);
+        mappings.orders[shopifyId] = result.id;
+        console.log(`  Created: ${order.name} (id ${result.id})`);
+        created++;
+      }
+      saveMappings(mappings);
+    } catch (err) {
+      failed++;
+      const msg = err.response?.data?.message || err.message;
+      console.error(`  Failed: ${order.name || shopifyId} — ${msg}`);
+      if (err.response?.data?.data?.params) {
+        console.error(`    ${JSON.stringify(err.response.data.data.params)}`);
+      }
     }
-
-    imported += batch.length;
-    saveMappings(mappings);
   }
 
-  return imported;
+  console.log(`  Summary: ${created} created, ${updated} updated, ${failed} failed`);
+  return created + updated;
 }
 
 async function main() {
@@ -323,7 +336,11 @@ async function main() {
 
   const mappings = loadMappings(options);
   if (options.fresh) {
-    console.log("Using --fresh: ignoring existing mappings (new site import)");
+    if (options.entity) {
+      console.log(`Using --fresh: cleared mappings for ${options.entity} only`);
+    } else {
+      console.log("Using --fresh: ignoring all existing mappings");
+    }
   }
   let woo = null;
 

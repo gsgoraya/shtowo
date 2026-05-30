@@ -281,9 +281,8 @@ export function orderToWoo(order, mappings) {
     customer_note: order.note || "",
     payment_method: "shopify_import",
     payment_method_title: gateway,
-    set_paid: ["PAID", "PARTIALLY_PAID"].includes(
-      String(order.displayFinancialStatus || "").toUpperCase()
-    ),
+    // Historical import — do not run payment flow (avoids duplicate notification emails)
+    set_paid: false,
     meta_data: [
       { key: "_shopify_order_id", value: order.id },
       { key: "_shopify_order_name", value: order.name },

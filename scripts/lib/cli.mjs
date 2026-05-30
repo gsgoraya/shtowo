@@ -44,7 +44,7 @@ Options:
   --entity products|customers|orders   Import only one entity (default: all)
   --dry-run                            Transform only, no WooCommerce writes
   --skip-images                        Skip product images (fast; run import-product-images later)
-  --fresh                              Ignore mappings file (use on a new site; avoids Invalid ID from local Docker IDs)
+  --fresh                              Clear mappings (all entities, or only --entity if set)
   --batch-size N                       Items per batch (default: 1 for products with images, 25 otherwise)
   --limit N                            Import only first N records
 `;
