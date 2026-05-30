@@ -48,7 +48,9 @@ export function mapOrderStatus(financialStatus, fulfillmentStatus, cancelledAt) 
 }
 
 export function mapAddress(addr, email) {
-  if (!addr) return {};
+  if (!addr) {
+    return { email: email || "" };
+  }
   return {
     first_name: addr.firstName || "",
     last_name: addr.lastName || "",
@@ -228,9 +230,32 @@ export function customerToWoo(customer) {
   };
 }
 
+export function resolveOrderEmail(order) {
+  const direct = order.email?.trim() || order.customer?.email?.trim();
+  if (direct) return direct;
+  if (order.customer?.id || order.phone) {
+    return resolveCustomerEmail({
+      id: order.customer?.id || `order-${shopifyIdNumeric(order.id)}`,
+      phone: order.phone || order.billingAddress?.phone || "",
+      email: null,
+    });
+  }
+  return `guest+${shopifyIdNumeric(order.id)}@${process.env.IMPORT_EMAIL_DOMAIN || "import.customer.local"}`;
+}
+
+export function lineItemSku(item) {
+  if (item.sku) return item.sku;
+  if (item.variant?.sku) return item.variant.sku;
+  const variantId = shopifyIdNumeric(item.variant?.id);
+  if (variantId) return `shopify-${variantId}`;
+  if (item.product?.handle) return item.product.handle;
+  return `shopify-line-${shopifyIdNumeric(item.id)}`;
+}
+
 export function orderToWoo(order, mappings) {
   const lineItems = [];
   const lineEdges = order.lineItems?.edges || [];
+  const orderEmail = resolveOrderEmail(order);
 
   for (const { node: item } of lineEdges) {
     const productGid = item.variant?.product?.id || item.product?.id;
@@ -238,14 +263,15 @@ export function orderToWoo(order, mappings) {
     const qty = item.quantity || 1;
     const unitPrice = item.originalUnitPriceSet?.shopMoney?.amount || "0";
     const lineTotal = item.discountedTotalSet?.shopMoney?.amount || String(Number(unitPrice) * qty);
+    const sku = lineItemSku(item);
 
     const lineItem = {
       name: item.title,
       quantity: qty,
       subtotal: lineTotal,
       total: lineTotal,
-      sku: item.sku || (item.variant?.sku ?? ""),
-      meta_data: [{ key: "_shopify_line_item_id", value: item.id }],
+      sku,
+      meta_data: [{ key: "_shopify_line_item_id", value: String(item.id) }],
     };
 
     if (wooProductId) {
@@ -274,8 +300,8 @@ export function orderToWoo(order, mappings) {
   return {
     status,
     customer_id: customerId || 0,
-    billing: mapAddress(order.billingAddress, order.email),
-    shipping: mapAddress(order.shippingAddress, order.email),
+    billing: mapAddress(order.billingAddress, orderEmail),
+    shipping: mapAddress(order.shippingAddress, orderEmail),
     line_items: lineItems,
     shipping_lines: shippingLines,
     customer_note: order.note || "",
