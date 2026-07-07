@@ -5,6 +5,7 @@ import { parseArgs, printHelp } from "./lib/cli.mjs";
 import { readJson, writeJson, ensureDir } from "./lib/fs-utils.mjs";
 import {
   productToWoo,
+  productToWooUpdate,
   customerToWoo,
   orderToWoo,
 } from "./lib/transform.mjs";
@@ -67,6 +68,15 @@ function chunk(array, size) {
   return chunks;
 }
 
+function productUpdateOptions(options) {
+  return {
+    fullUpdate: options.fullProductUpdate,
+    syncDescriptions: options.syncDescriptions,
+    syncImages: options.syncImages,
+    syncCategories: options.syncCategories,
+  };
+}
+
 async function importProducts(woo, options, mappings) {
   const products = readJson(config.paths.products, []);
   if (!products.length) {
@@ -76,6 +86,16 @@ async function importProducts(woo, options, mappings) {
 
   const limited = options.limit ? products.slice(0, options.limit) : products;
   const withImages = !options.skipImages;
+  const updateOpts = productUpdateOptions(options);
+
+  if (!options.fullProductUpdate && !options.dryRun) {
+    console.log(
+      "Safe product update: price/stock/name only — ACF meta, images, categories, slug preserved."
+    );
+    console.log(
+      "  Add --sync-descriptions|--sync-images|--sync-categories or --full-product-update to change that."
+    );
+  }
 
   if (withImages) {
     console.log("Importing products one at a time (images use resized Shopify URLs)...");
@@ -109,7 +129,7 @@ async function importProducts(woo, options, mappings) {
         }
 
         if (wooId) {
-          const { sku, ...updatePayload } = payload;
+          const updatePayload = productToWooUpdate(payload, updateOpts);
           await updateOne(woo, "products", wooId, updatePayload);
           console.log(`  Updated: ${product.title}`);
         } else {
@@ -162,7 +182,10 @@ async function importProducts(woo, options, mappings) {
 
       const existingWooId = mappings.products[shopifyId];
       if (existingWooId) {
-        toUpdate.push({ id: existingWooId, ...payload });
+        toUpdate.push({
+          id: existingWooId,
+          ...productToWooUpdate(payload, updateOpts),
+        });
         updateIds.push(shopifyId);
       } else {
         toCreate.push(payload);

@@ -196,6 +196,51 @@ export function productToWoo(product, { localImages = [], skipImages = false } =
   return { payload, variants, shopifyId: product.id, skippedImages };
 }
 
+/**
+ * Partial product update — avoids meta_data (ACF lives in post meta), images, categories, slug.
+ */
+export function productToWooUpdate(payload, options = {}) {
+  const {
+    syncDescriptions = false,
+    syncImages = false,
+    syncCategories = false,
+    fullUpdate = false,
+  } = options;
+
+  if (fullUpdate) {
+    const { sku, ...rest } = payload;
+    return rest;
+  }
+
+  const update = {
+    name: payload.name,
+    regular_price: payload.regular_price,
+    manage_stock: payload.manage_stock,
+    stock_quantity: payload.stock_quantity,
+    status: payload.status,
+  };
+
+  if (payload.sale_price) {
+    update.sale_price = payload.sale_price;
+  }
+  if (payload.weight) {
+    update.weight = payload.weight;
+  }
+  if (syncDescriptions) {
+    update.description = payload.description;
+    update.short_description = payload.short_description;
+  }
+  if (syncImages && payload.images?.length) {
+    update.images = payload.images;
+  }
+  if (syncCategories) {
+    update.categories = payload.categories;
+    update.tags = payload.tags;
+  }
+
+  return update;
+}
+
 export function customerToWoo(customer) {
   const addressList = Array.isArray(customer.addresses)
     ? customer.addresses

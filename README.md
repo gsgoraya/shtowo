@@ -16,6 +16,15 @@ npm run woo:fix-permalinks
 # Test WooCommerce API keys
 npm run woo:test
 
+# Re-sync products from Shopify (update existing + create new; preserves ACF on updates)
+npm run import:products:sync
+# Or manually:
+# npm run export:products
+# npm run import:products
+# Updates only touch name/price/stock/status — not meta_data, images, categories, or slug.
+# Optional: --sync-descriptions --sync-images --sync-categories
+# Destructive (old behavior): --full-product-update
+
 # Live import (requires .env WooCommerce keys)
 cp .env.example .env   # fill in WOO_URL, WOO_CONSUMER_KEY, WOO_CONSUMER_SECRET
 node scripts/import-woocommerce.mjs --entity products

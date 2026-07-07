@@ -7,6 +7,10 @@ export function parseArgs(argv = process.argv.slice(2)) {
     includeDrafts: false,
     skipImages: false,
     fresh: false,
+    fullProductUpdate: false,
+    syncDescriptions: false,
+    syncImages: false,
+    syncCategories: false,
     batchSize: 25,
   };
 
@@ -16,6 +20,10 @@ export function parseArgs(argv = process.argv.slice(2)) {
     else if (arg === "--resume") options.resume = true;
     else if (arg === "--fresh") options.fresh = true;
     else if (arg === "--skip-images") options.skipImages = true;
+    else if (arg === "--full-product-update") options.fullProductUpdate = true;
+    else if (arg === "--sync-descriptions") options.syncDescriptions = true;
+    else if (arg === "--sync-images") options.syncImages = true;
+    else if (arg === "--sync-categories") options.syncCategories = true;
     else if (arg === "--include-drafts") options.includeDrafts = true;
     else if (arg === "--entity" && argv[i + 1]) options.entity = argv[++i];
     else if (arg === "--limit" && argv[i + 1]) options.limit = Number(argv[++i]);
@@ -45,6 +53,10 @@ Options:
   --dry-run                            Transform only, no WooCommerce writes
   --skip-images                        Skip product images (fast; run import-product-images later)
   --fresh                              Clear mappings (all entities, or only --entity if set)
+  --full-product-update                On existing products, send full payload (may touch meta/images)
+  --sync-descriptions                  Include description on product update (default: off)
+  --sync-images                        Replace images on product update (default: off)
+  --sync-categories                    Replace categories/tags on product update (default: off)
   --batch-size N                       Items per batch (default: 1 for products with images, 25 otherwise)
   --limit N                            Import only first N records
 `;

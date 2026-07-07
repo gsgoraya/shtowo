@@ -6,6 +6,8 @@
   "scripts": {
     "export": "node scripts/export-shopify.mjs",
     "export:products": "node scripts/export-shopify.mjs --entity products",
+    "import:products": "node scripts/import-woocommerce.mjs --entity products --skip-images",
+    "import:products:sync": "node scripts/export-shopify.mjs --entity products && node scripts/import-woocommerce.mjs --entity products --skip-images",
     "export:customers": "node scripts/export-shopify.mjs --entity customers",
     "export:orders": "node scripts/export-shopify.mjs --entity orders",
     "import": "node scripts/import-woocommerce.mjs",
