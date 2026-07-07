@@ -29,6 +29,9 @@ npm run link:products -- --apply
 # npm run export:products
 # npm run import:products
 # Updates only touch name/price/stock/status — not meta_data, images, categories, or slug.
+# After product sync, import images (products import skips images by default):
+npm run import:images:missing
+# Or all mapped products: npm run import:images
 # Optional: --sync-descriptions --sync-images --sync-categories
 # Destructive (old behavior): --full-product-update
 

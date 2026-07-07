@@ -11,6 +11,8 @@ export function parseArgs(argv = process.argv.slice(2)) {
     syncDescriptions: false,
     syncImages: false,
     syncCategories: false,
+    missingOnly: false,
+    force: false,
     batchSize: 25,
   };
 
@@ -24,6 +26,8 @@ export function parseArgs(argv = process.argv.slice(2)) {
     else if (arg === "--sync-descriptions") options.syncDescriptions = true;
     else if (arg === "--sync-images") options.syncImages = true;
     else if (arg === "--sync-categories") options.syncCategories = true;
+    else if (arg === "--missing-only") options.missingOnly = true;
+    else if (arg === "--force") options.force = true;
     else if (arg === "--include-drafts") options.includeDrafts = true;
     else if (arg === "--entity" && argv[i + 1]) options.entity = argv[++i];
     else if (arg === "--limit" && argv[i + 1]) options.limit = Number(argv[++i]);
