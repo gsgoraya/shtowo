@@ -21,6 +21,10 @@ npm run import:products:sync
 
 # Find WooCommerce products not matching current Shopify export
 npm run audit:products
+
+# Propose/apply Shopify→Woo mappings by slug, handle, or title (preserves ACF on linked products)
+npm run link:products          # dry-run
+npm run link:products -- --apply
 # Or manually:
 # npm run export:products
 # npm run import:products

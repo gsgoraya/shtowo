@@ -15,7 +15,8 @@
     "woo:test": "node scripts/test-woo-connection.mjs",
     "woo:fix-permalinks": "node scripts/fix-woo-permalinks.mjs",
     "import:images": "node scripts/import-product-images.mjs",
-    "audit:products": "node scripts/audit-product-sync.mjs"
+    "audit:products": "node scripts/audit-product-sync.mjs",
+    "link:products": "node scripts/link-product-mappings.mjs"
   },
   "dependencies": {
     "@woocommerce/woocommerce-rest-api": "^1.0.1",
