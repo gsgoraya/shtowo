@@ -14,7 +14,8 @@
     "import:dry": "node scripts/import-woocommerce.mjs --dry-run",
     "woo:test": "node scripts/test-woo-connection.mjs",
     "woo:fix-permalinks": "node scripts/fix-woo-permalinks.mjs",
-    "import:images": "node scripts/import-product-images.mjs"
+    "import:images": "node scripts/import-product-images.mjs",
+    "audit:products": "node scripts/audit-product-sync.mjs"
   },
   "dependencies": {
     "@woocommerce/woocommerce-rest-api": "^1.0.1",

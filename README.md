@@ -18,6 +18,9 @@ npm run woo:test
 
 # Re-sync products from Shopify (update existing + create new; preserves ACF on updates)
 npm run import:products:sync
+
+# Find WooCommerce products not matching current Shopify export
+npm run audit:products
 # Or manually:
 # npm run export:products
 # npm run import:products
