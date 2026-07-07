@@ -327,8 +327,14 @@ async function importOrders(woo, options, mappings) {
       saveMappings(mappings);
     } catch (err) {
       failed++;
+      const status = err.response?.status;
       const msg = err.response?.data?.message || err.message;
       console.error(`  Failed: ${order.name || shopifyId} — ${msg}`);
+      if (status === 502) {
+        console.error(
+          `    HTTP 502 (gateway timeout). Retry: npm run import:order -- --name "${order.name}"`
+        );
+      }
       if (err.response?.data?.data?.params) {
         console.error(`    ${JSON.stringify(err.response.data.data.params)}`);
       }
