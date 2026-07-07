@@ -51,6 +51,14 @@ node scripts/import-woocommerce.mjs --entity products
 # Re-import orders after deleting them in WooCommerce (keeps product/customer mappings):
 # node scripts/import-woocommerce.mjs --entity orders --fresh
 
+# Pull new Shopify customers + orders into WooCommerce (full re-export, upsert via mappings):
+npm run import:customers-orders:sync
+# Or step by step:
+# npm run export:customers && npm run export:orders
+# npm run import:customers
+# npm run import:orders
+# Do NOT use --fresh unless you intentionally want to re-create all orders/customers.
+
 node scripts/import-woocommerce.mjs --entity customers
 # Phone-only Shopify customers get placeholder emails (see IMPORT_EMAIL_DOMAIN in .env)
 # Products with .svg images import without image (upload PNG/JPG manually or enable SVG in WP)
